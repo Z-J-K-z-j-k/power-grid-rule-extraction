@@ -43,9 +43,9 @@ python -m src.main --pdf data/raw/target_file.pdf --run evaluate
 
 ## 输出
 
-- `data/interim/`：解析后的 JSON
-- `data/processed/`：画像、分段计划、segments、抽取与归一化结果
-- `outputs/tables/`：CSV 导出
+- `data/interim/`：解析后的 JSON；含 **`{stem}_formula_blocks.json`**（公式块启发式定位，供后续 OCR/渲染分支）
+- `data/processed/`：画像、分段计划、segments、**抽取主表 `*_extracted.json`**、**`*_constraints.json`**、**`*_consequences.json`**、归一化规则
+- `outputs/tables/`：**`*_rules.csv`**（主规则，含 `rule_category` / `modality` / 层级字段）、**`*_constraints.csv`**、**`*_consequences.csv`**、**`*_rules_normalized.csv`**
 - `data/eval/`：评估占位报告
 
 ## 测试
