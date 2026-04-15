@@ -44,9 +44,10 @@ python -m src.main --pdf data/raw/target_file.pdf --run evaluate
 ## 输出
 
 - `data/interim/`：解析后的 JSON；含 **`{stem}_formula_blocks.json`**（公式块启发式定位，供后续 OCR/渲染分支）
-- `data/processed/`：画像、分段计划、segments、**抽取主表 `*_extracted.json`**、**`*_constraints.json`**、**`*_consequences.json`**、归一化规则
-- `outputs/tables/`：**`*_rules.csv`**（主规则，含 `rule_category` / `modality` / 层级字段）、**`*_constraints.csv`**、**`*_consequences.csv`**、**`*_rules_normalized.csv`**
-- `data/eval/`：评估占位报告
+- `data/processed/`：画像、分段计划、segments、**`*_extracted.json`**、**`*_constraints.json`**、**`*_consequences.json`**、**`*_normalized.json`**（含 **`parent_rule_id` 回填**、条款格式整理、类型轻量纠偏）
+- **normalize 额外写出**：**`*_formulas.json`**、**`*_variables.json`**、**`*_constraints_enriched.json`**（约束行增加 **`formula_id`**，并与公式块/派生公式对齐）
+- `outputs/tables/`：上述文件的 CSV 镜像；主表看 **`*_rules_normalized.csv`**，约束增强看 **`*_constraints_enriched.csv`**
+- `data/eval/`：**`*_eval_report.json`**（规则层统计 + 子表层统计；有金标后可再扩展 F1）
 
 ## 测试
 
