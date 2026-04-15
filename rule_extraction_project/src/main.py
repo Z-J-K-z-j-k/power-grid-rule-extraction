@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .analyzers.document_profiler import profile_document
 from .analyzers.segmentation_planner import build_segmentation_plan
-from .config.schemas import ExtractedRule, Segment
+from .config.schemas import ConsequenceRecord, ConstraintRecord, ExtractedRule, Segment
 from .config.settings import DATA_EVAL, DATA_INTERIM, DATA_PROCESSED, EXTRACT_MAX_WORKERS, OUTPUTS_TABLES
 from .evaluators.extraction_eval import evaluate_extraction
 from .evaluators.report_generator import build_report
@@ -37,7 +37,13 @@ def _stem(pdf: Path) -> str:
 def run_parse(pdf: Path) -> dict:
     stem = _stem(pdf)
     log.info("parse: %s", pdf)
-    return parse_pdf_to_document(pdf, stem)
+    doc = parse_pdf_to_document(pdf, stem)
+    from .parsers.formula_detector import detect_formula_blocks, write_formula_blocks_report
+
+    blocks = detect_formula_blocks(doc["full_text"], stem)
+    p = write_formula_blocks_report(blocks, stem, DATA_INTERIM)
+    log.info("formula block hints: %d (see %s)", len(blocks), p.name)
+    return doc
 
 
 def run_profile(pdf: Path) -> dict:
@@ -67,7 +73,9 @@ def run_plan(pdf: Path) -> dict:
 _log_lock = threading.Lock()
 
 
-def _extract_one_segment(args: tuple[int, dict, int]) -> tuple[int, list[ExtractedRule]]:
+def _extract_one_segment(
+    args: tuple[int, dict, int],
+) -> tuple[int, list[ExtractedRule], list[ConstraintRecord], list[ConsequenceRecord]]:
     idx, row, total = args
     seg = Segment(**row)
     nchars = len(seg.text or "")
@@ -81,10 +89,17 @@ def _extract_one_segment(args: tuple[int, dict, int]) -> tuple[int, list[Extract
             nchars,
             preview,
         )
-    rules = extract_rules_from_segment(seg)
+    rules, cons, csq = extract_rules_from_segment(seg)
     with _log_lock:
-        log.info("extract [%d/%d] got %d rule(s)", idx, total, len(rules))
-    return idx, rules
+        log.info(
+            "extract [%d/%d] got %d rule(s), %d constraints, %d consequences",
+            idx,
+            total,
+            len(rules),
+            len(cons),
+            len(csq),
+        )
+    return idx, rules, cons, csq
 
 
 def run_segment(pdf: Path) -> list[dict]:
@@ -101,6 +116,16 @@ def run_segment(pdf: Path) -> list[dict]:
     return out
 
 
+def _write_csv_dicts(path: Path, rows: list[dict]) -> None:
+    if not rows:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        w.writerows(rows)
+
+
 def run_extract(pdf: Path) -> list[dict]:
     stem = _stem(pdf)
     seg_data = read_json(DATA_PROCESSED / f"{stem}_segments.json")
@@ -113,25 +138,34 @@ def run_extract(pdf: Path) -> list[dict]:
         workers,
     )
     all_rules: list[ExtractedRule] = []
+    all_cons: list[ConstraintRecord] = []
+    all_csq: list[ConsequenceRecord] = []
     if workers <= 1:
         for idx, row in enumerate(seg_data, start=1):
-            _, rules = _extract_one_segment((idx, row, total))
+            _, rules, cons, csq = _extract_one_segment((idx, row, total))
             all_rules.extend(rules)
+            all_cons.extend(cons)
+            all_csq.extend(csq)
     else:
         args_list = [(i, row, total) for i, row in enumerate(seg_data, start=1)]
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            for _, rules in ex.map(_extract_one_segment, args_list):
+            for _, rules, cons, csq in ex.map(_extract_one_segment, args_list):
                 all_rules.extend(rules)
+                all_cons.extend(cons)
+                all_csq.extend(csq)
     rows = [r.model_dump() for r in all_rules]
     write_json(DATA_PROCESSED / f"{stem}_extracted.json", rows)
-    csv_path = OUTPUTS_TABLES / f"{stem}_rules.csv"
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    if rows:
-        with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-            w.writeheader()
-            w.writerows(rows)
-    log.info("extracted rules: %d", len(rows))
+    write_json(DATA_PROCESSED / f"{stem}_constraints.json", [c.model_dump() for c in all_cons])
+    write_json(DATA_PROCESSED / f"{stem}_consequences.json", [c.model_dump() for c in all_csq])
+    _write_csv_dicts(OUTPUTS_TABLES / f"{stem}_rules.csv", rows)
+    _write_csv_dicts(OUTPUTS_TABLES / f"{stem}_constraints.csv", [c.model_dump() for c in all_cons])
+    _write_csv_dicts(OUTPUTS_TABLES / f"{stem}_consequences.csv", [c.model_dump() for c in all_csq])
+    log.info(
+        "extracted rules: %d, constraints rows: %d, consequences rows: %d",
+        len(rows),
+        len(all_cons),
+        len(all_csq),
+    )
     return rows
 
 
