@@ -11,14 +11,19 @@ from pathlib import Path
 from .analyzers.document_profiler import profile_document
 from .analyzers.segmentation_planner import build_segmentation_plan
 from .config.schemas import ConsequenceRecord, ConstraintRecord, ExtractedRule, Segment
+from .evaluators.constraint_eval import evaluate_side_tables
 from .config.settings import DATA_EVAL, DATA_INTERIM, DATA_PROCESSED, EXTRACT_MAX_WORKERS, OUTPUTS_TABLES
 from .evaluators.extraction_eval import evaluate_extraction
 from .evaluators.report_generator import build_report
 from .evaluators.segmentation_eval import evaluate_segmentation
 from .extractors.exception_linker import link_exceptions
 from .extractors.rule_extractor import extract_rules_from_segment
+from .normalizers.category_corrector import correct_rule_categories
+from .normalizers.citation_normalizer import normalize_citation_fields
 from .normalizers.field_normalizer import normalize_rule_fields
+from .normalizers.formula_catalog import build_formula_catalog
 from .normalizers.formula_handler import tag_formulas
+from .normalizers.parent_rule_linker import link_parent_rules
 from .normalizers.value_normalizer import normalize_values
 from .parsers.pdf_parser import parse_pdf_to_document
 from .segmenters.hybrid_segmenter import hybrid_segment
@@ -178,7 +183,10 @@ def run_normalize(pdf: Path) -> list[dict]:
         r = normalize_rule_fields(r)
         r = normalize_values(r)
         r = tag_formulas(r)
+        r = correct_rule_categories(r)
+        r = normalize_citation_fields(r)
         normalized.append(r)
+    normalized = link_parent_rules(normalized)
     linked = link_exceptions(normalized)
     out = [r.model_dump() for r in linked]
     write_json(DATA_PROCESSED / f"{stem}_normalized.json", out)
@@ -189,6 +197,24 @@ def run_normalize(pdf: Path) -> list[dict]:
             w.writeheader()
             w.writerows(out)
     log.info("normalized rules: %d", len(out))
+
+    cpath = DATA_PROCESSED / f"{stem}_constraints.json"
+    if cpath.is_file():
+        raw_cons = read_json(cpath)
+        cons_list = [ConstraintRecord(**x) for x in raw_cons]
+        formulas, variables, cons_enriched = build_formula_catalog(stem, cons_list, DATA_INTERIM)
+        write_json(DATA_PROCESSED / f"{stem}_formulas.json", [f.model_dump() for f in formulas])
+        write_json(DATA_PROCESSED / f"{stem}_variables.json", [v.model_dump() for v in variables])
+        write_json(DATA_PROCESSED / f"{stem}_constraints_enriched.json", [c.model_dump() for c in cons_enriched])
+        _write_csv_dicts(OUTPUTS_TABLES / f"{stem}_formulas.csv", [f.model_dump() for f in formulas])
+        _write_csv_dicts(OUTPUTS_TABLES / f"{stem}_variables.csv", [v.model_dump() for v in variables])
+        _write_csv_dicts(OUTPUTS_TABLES / f"{stem}_constraints_enriched.csv", [c.model_dump() for c in cons_enriched])
+        log.info(
+            "formula catalog: %d formulas, %d variables, %d constraints (enriched)",
+            len(formulas),
+            len(variables),
+            len(cons_enriched),
+        )
     return out
 
 
@@ -201,7 +227,18 @@ def run_evaluate(pdf: Path) -> dict:
     rules = read_json(norm_path) if norm_path.exists() else []
     seg_eval = evaluate_segmentation(segs, None)
     ext_eval = evaluate_extraction(rules, None)
-    report = build_report(seg_eval, ext_eval)
+
+    def _load(name: str) -> list[dict]:
+        p = DATA_PROCESSED / f"{stem}_{name}.json"
+        return read_json(p) if p.is_file() else []
+
+    side = evaluate_side_tables(
+        _load("constraints_enriched") or _load("constraints"),
+        _load("consequences"),
+        _load("formulas"),
+        _load("variables"),
+    )
+    report = build_report(seg_eval, ext_eval, side_tables=side)
     write_json(DATA_EVAL / f"{stem}_eval_report.json", report)
     log.info("eval report: %s", stem)
     return report

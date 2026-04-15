@@ -46,6 +46,39 @@ class Segment(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class FormulaRecord(BaseModel):
+    """Formula block (from PDF block detection or derived from constraint text)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    formula_id: str
+    segment_id: str = ""
+    article: str = ""
+    source: str = ""
+    formula_block_id: str = ""
+    char_start: int | None = None
+    char_end: int | None = None
+    trigger_matched: str = ""
+    formula_name: str = ""
+    formula_text_raw: str = ""
+    formula_text_normalized: str = ""
+    parse_note: str = ""
+    linked_rule_ids: str = ""
+
+
+class VariableRecord(BaseModel):
+    """Variable explanation (式中) linked to a formula."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    variable_id: str
+    formula_id: str
+    symbol: str = ""
+    meaning: str = ""
+    unit: str = ""
+    notes: str = ""
+
+
 class ConstraintRecord(BaseModel):
     """Structured threshold / metric / formula-input (attached to a rule)."""
 
@@ -54,6 +87,7 @@ class ConstraintRecord(BaseModel):
     constraint_id: str
     rule_id: str
     segment_id: str = ""
+    formula_id: str = ""
     constraint_type: str = ""
     metric_name: str = ""
     metric_normalized: str = ""

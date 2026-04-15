@@ -3,8 +3,10 @@ from .schemas import (
     ConstraintRecord,
     DocumentProfile,
     ExtractedRule,
+    FormulaRecord,
     Segment,
     SegmentationPlan,
+    VariableRecord,
 )
 
 __all__ = [
@@ -12,6 +14,8 @@ __all__ = [
     "ConstraintRecord",
     "DocumentProfile",
     "ExtractedRule",
+    "FormulaRecord",
     "Segment",
     "SegmentationPlan",
+    "VariableRecord",
 ]
